@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f6157'/%3E%3Cpath d='M8 10h16M8 22h16M16 10v12' stroke='white' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+  <title>Open Redirect &amp; SSRF</title>
+  <style>
+    :root {
+      --ink: #203631;
+      --muted: #586b64;
+      --green: #246658;
+      --border: #dbe3de;
+      --paper: #fdfefd;
+      font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+      color: var(--ink);
+      background: #eef2ef;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: clamp(20px, 3vw, 48px); }
+    main { max-width: 1480px; margin: auto; }
+    .page-header { display: flex; align-items: center; gap: 16px; margin: 0 0 28px 4px; }
+    .brand {
+      display: grid; place-items: center; width: 46px; height: 46px;
+      border: 1px solid #c5d8ce; border-radius: 14px; background: #e1ece5; color: #246658;
+    }
+    .brand svg { width: 24px; height: 24px; }
+    h1 { margin: 0; font-size: clamp(27px, 3.1vw, 41px); font-weight: 600; letter-spacing: -.045em; }
+    h1 span { color: #83968b; font-weight: 400; padding: 0 3px; }
+    .workspace {
+      overflow: hidden; border: 1px solid #cfdad3; border-radius: 22px;
+      background: var(--paper); box-shadow: 0 6px 12px #263e3103, 0 20px 60px #263e3105;
+    }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 15px 22px; border-bottom: 1px solid var(--border); background: #ffffff; }
+    .tabs { display: flex; gap: 6px; }
+    .scenario-switch { display: flex; gap: 3px; padding: 4px; background: #f1f5f2; border: 1px solid #dbe3de; border-radius: 12px; }
+    .scenario-switch button { padding: 8px 13px; font-size: 13px; }
+    .scenario-switch button[aria-pressed="true"] { background: #ffffff; color: #205b4d; border-color: #c6d8cb; box-shadow: 0 1px 3px #2036310a; }
+    .inactive .node-title, .inactive .node-subtitle { fill: #65766a; }
+    button {
+      display: inline-flex; justify-content: center; align-items: center; gap: 9px;
+      appearance: none; cursor: pointer; border: 1px solid transparent; border-radius: 9px;
+      background: transparent; padding: 11px 17px; color: var(--muted);
+      font: inherit; font-size: 14px; font-weight: 600; line-height: 1.4;
+      transition: background 150ms, color 150ms;
+    }
+    button svg { width: 17px; height: 17px; flex-shrink: 0; }
+    button:hover { color: var(--green); background: #f4f7f4; }
+    button[aria-selected="true"] { color: #205b4d; background: #e9f2ec; border-color: #d4e3d9; }
+    button:focus-visible, .viewport:focus-visible { outline: 3px solid #2d6eac; outline-offset: -3px; }
+    [hidden] { display: none !important; }
+    .viewport { overflow-x: auto; padding: 16px 16px 6px; scrollbar-color: #a8beb0 #f2f5f2; }
+    .diagram { display: block; width: 100%; min-width: 1000px; height: auto; }
+    .diagram text { font-family: inherit; text-anchor: middle; }
+    .diagram .left { text-anchor: start; }
+    .node-title { font-size: 20px; font-weight: 650; fill: #203631; letter-spacing: -.025em; }
+    .node-subtitle { font-size: 16px; font-weight: 450; fill: #586b64; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important; font-size: 14px; }
+    .group-label { font-size: 13px; font-weight: 650; letter-spacing: 1.6px; text-transform: uppercase; }
+    .edge-label { font-size: 16px; font-weight: 550; }
+    .gate-label { font-size: 14px; font-weight: 600; }
+    .legend {
+      display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+      gap: 14px 30px; margin: 0 30px; padding: 18px 0 20px;
+      border-top: 1px solid #e4eae5; color: var(--muted); font-size: 12px; font-weight: 550;
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+    .legend svg { width: 34px; height: 14px; overflow: visible; }
+    @media (max-width: 700px) {
+      .page-header { gap: 11px; margin-bottom: 21px; }
+      .brand { width: 39px; height: 39px; border-radius: 12px; flex-shrink: 0; }
+      .workspace { border-radius: 16px; }
+      .toolbar { padding: 10px; gap: 8px; }
+      .tabs, .scenario-switch { width: 100%; }
+      .scenario-switch button { flex: 1; font-size: 12px; }
+      .tabs { gap: 3px; }
+      .tabs button { flex: 1; font-size: 12px; padding: 10px 7px; gap: 6px; }
+      .tabs button svg { display: none; }
+      .viewport { padding: 10px 0 0; }
+      .legend { gap: 12px 20px; margin: 0 18px; justify-content: flex-start; }
+    }
+    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+    @media print {
+      :root, body { background: white; }
+      body { padding: 0; }
+      .page-header { margin-bottom: 12px; }
+      .toolbar, .legend { display: none; }
+      .workspace { border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+      .panel { display: block !important; break-before: page; break-inside: avoid; }
+      .panel:first-of-type { break-before: auto; }
+      .panel::before {
+        content: attr(data-title); display: block; padding: 12px 16px;
+        font-size: 18px; font-weight: 600;
+      }
+      .viewport { overflow: visible; padding: 0; }
+      .diagram { min-width: 0; }
+      @page { size: landscape; margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <span class="brand" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+          stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="2" width="8" height="6" rx="1.5"/>
+          <path d="M12 8v5M5 17v-4h14v4"/>
+          <rect x="2" y="17" width="6" height="5" rx="1.2"/>
+          <rect x="16" y="17" width="6" height="5" rx="1.2"/>
+        </svg>
+      </span>
+      <h1>Open Redirect <span>&amp;</span> SSRF</h1>
+    </header>
+    <div class="workspace">
+      <div class="toolbar">
+        <div class="tabs" role="tablist" aria-label="Diagram Type">
+          <button type="button" role="tab" id="system-tab"
+            aria-controls="system-trusted-panel system-direct-panel system-chain-panel"
+            aria-selected="true" tabindex="0" data-view="system">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="7" y="2" width="6" height="5" rx="1"/><path d="M10 7v4M4 14v-3h12v3"/>
+              <rect x="1" y="14" width="6" height="4" rx="1"/><rect x="13" y="14" width="6" height="4" rx="1"/>
+            </svg>
+            System Diagram
+          </button>
+          <button type="button" role="tab" id="sequence-tab"
+            aria-controls="sequence-trusted-panel sequence-direct-panel sequence-chain-panel"
+            aria-selected="false" tabindex="-1" data-view="sequence">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M3 2v16M17 2v16M3 6h13m-3-3l3 3-3 3M17 14H4m3-3l-3 3 3 3"/>
+            </svg>
+            Sequence Diagram
+          </button>
+        </div>
+        <div class="scenario-switch" role="group" aria-label="Request Path">
+          <button type="button" id="trusted-mode" aria-pressed="true" data-scenario="trusted"
+            aria-controls="system-trusted-panel sequence-trusted-panel">Trusted Request</button>
+          <button type="button" id="direct-mode" aria-pressed="false" data-scenario="direct"
+            aria-controls="system-direct-panel sequence-direct-panel">Direct Request</button>
+          <button type="button" id="chain-mode" aria-pressed="false" data-scenario="chain"
+            aria-controls="system-chain-panel sequence-chain-panel">Redirect Chain</button>
+        </div>
+      </div>
+      <section class="panel" id="system-trusted-panel" role="tabpanel"
+        aria-labelledby="system-tab trusted-mode" data-view="system" data-scenario="trusted"
+        data-title="System Diagram · Trusted Request">
+        <div class="viewport" tabindex="0" role="region" aria-label="System Diagram · Trusted Request">
+          <svg class="diagram" id="system-trusted-diagram" viewBox="0 0 1440 830"
+            role="img" aria-labelledby="system-trusted-title">
+            <title id="system-trusted-title">System Diagram · Trusted Request</title>
+          </svg>
+        </div>
+      </section>
+      <section class="panel" id="system-direct-panel" role="tabpanel"
+        aria-labelledby="system-tab direct-mode" data-view="system" data-scenario="direct"
+        data-title="System Diagram · Direct Request" hidden>
+        <div class="viewport" tabindex="0" role="region" aria-label="System Diagram · Direct Request">
+          <svg class="diagram" id="system-direct-diagram" viewBox="0 0 1440 830"
+            role="img" aria-labelledby="system-direct-title">
+            <title id="system-direct-title">System Diagram · Direct Request</title>
+          </svg>
+        </div>
+      </section>
+      <section class="panel" id="system-chain-panel" role="tabpanel"
+        aria-labelledby="system-tab chain-mode" data-view="system" data-scenario="chain"
+        data-title="System Diagram · Redirect Chain" hidden>
+        <div class="viewport" tabindex="0" role="region" aria-label="System Diagram">
+          <svg class="diagram" id="system-chain-diagram" viewBox="0 0 1440 830" role="img" aria-labelledby="system-chain-title">
+            <title id="system-chain-title">System Diagram · Redirect Chain</title>
+          </svg>
+        </div>
+      </section>
+      <section class="panel" id="sequence-trusted-panel" role="tabpanel"
+        aria-labelledby="sequence-tab trusted-mode" data-view="sequence" data-scenario="trusted"
+        data-title="Sequence Diagram · Trusted Request" hidden>
+        <div class="viewport" tabindex="0" role="region" aria-label="Sequence Diagram · Trusted Request">
+          <svg class="diagram" id="sequence-trusted-diagram" viewBox="0 0 1440 830"
+            role="img" aria-labelledby="sequence-trusted-title">
+            <title id="sequence-trusted-title">Sequence Diagram · Trusted Request</title>
+          </svg>
+        </div>
+      </section>
+      <section class="panel" id="sequence-direct-panel" role="tabpanel"
+        aria-labelledby="sequence-tab direct-mode" data-view="sequence" data-scenario="direct"
+        data-title="Sequence Diagram · Direct Request" hidden>
+        <div class="viewport" tabindex="0" role="region" aria-label="Direct Request">
+          <svg class="diagram" id="direct-diagram" viewBox="0 0 1440 830" role="img" aria-labelledby="direct-title">
+            <title id="direct-title">Direct Request</title>
+          </svg>
+        </div>
+      </section>
+      <section class="panel" id="sequence-chain-panel" role="tabpanel"
+        aria-labelledby="sequence-tab chain-mode" data-view="sequence" data-scenario="chain"
+        data-title="Sequence Diagram · Redirect Chain" hidden>
+        <div class="viewport" tabindex="0" role="region" aria-label="Redirect Chain">
+          <svg class="diagram" id="chain-diagram" viewBox="0 0 1440 830" role="img" aria-labelledby="chain-title">
+            <title id="chain-title">Redirect Chain</title>
+          </svg>
+        </div>
+      </section>
+      <div class="legend" aria-label="Connections"></div>
+    </div>
+  </main>
+  <script>
+    const palette = {
+      request: { color: "#2d6293", name: "HTTP Request", dash: "" },
+      redirect: { color: "#975a19", name: "HTTP 302", dash: "7 5" },
+      internal: { color: "#ae3d50", name: "SSRF", dash: "" },
+      data: { color: "#267361", name: "Response Data", dash: "3 5" }
+    };
+    const icons = {
+      person: '<circle cx="12" cy="7" r="3"/><path d="M5 21v-3a7 7 0 0 1 14 0v3"/>',
+      assistant: '<rect x="3" y="6" width="18" height="14" rx="4"/><path d="M12 3v3M8 12h.01M16 12h.01M8 16h8"/>',
+      shield: '<path d="M12 2l8 4v6c0 5-8 10-8 10S4 17 4 12V6zM8 12l3 3 5-6"/>',
+      server: '<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/>',
+      globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
+      database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/>'
+    };
+    const esc = value => String(value).replace(/[&<>"']/g, char =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    const rect = (x, y, w, h, fill, stroke = "none", radius = 12) =>
+      '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
+      '" rx="' + radius + '" fill="' + fill + '" stroke="' + stroke + '"/>';
+    const text = (x, y, value, css = "", fill = "") =>
+      '<text x="' + x + '" y="' + y + '" class="' + css + '"' +
+      (fill ? ' fill="' + fill + '"' : "") + '>' + esc(value) + '</text>';
+    function icon(x, y, name, color = "#456b5c") {
+      return '<g transform="translate(' + x + ' ' + y +
+        ')" fill="none" stroke="' + color + '" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+        icons[name] + '</g>';
+    }
+    function defs(prefix) {
+      return '<defs>' + Object.entries(palette).map(([key, value]) =>
+        '<marker id="' + prefix + '-' + key +
+        '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">' +
+        '<path d="M 1 1 L 9 5 L 1 9 Z" fill="' + value.color + '"/></marker>'
+      ).join("") + '</defs>';
+    }
+    function path(prefix, d, kind = "request", arrow = true) {
+      const p = palette[kind];
+      return '<path d="' + d + '" fill="none" stroke="' + p.color +
+        '" stroke-width="2.3" stroke-linejoin="round" stroke-linecap="round"' +
+        (p.dash ? ' stroke-dasharray="' + p.dash + '"' : "") +
+        (arrow ? ' marker-end="url(#' + prefix + '-' + kind + ')"' : "") + '/>';
+    }
+    function label(x, y, value, kind = "request") {
+      const w = value.length * 8.4 + 20;
+      return rect(x - w / 2, y - 18, w, 26, "#fdfefd", "none", 6) +
+        text(x, y, value, "edge-label", palette[kind].color);
+    }
+    function zone(x, y, w, h, name, type = "public") {
+      const privateZone = type === "private";
+      return rect(x, y, w, h, privateZone ? "#f2f6f2" : "#f6f8f9",
+          privateZone ? "#7b8d81" : "#7b8b96", 18) +
+        text(x + 24, y + 32, name, "group-label left", privateZone ? "#526e5b" : "#586b77");
+    }
+    function card(x, y, w, h, title, subtitle, glyph, accent = false) {
+      return '<g>' + rect(x, y + 3, w, h, "#20363105", "none", 13) +
+        rect(x, y, w, h, accent ? "#fff5f5" : "#ffffff", accent ? "#d9a6af" : "#c8d5cc", 13) +
+        rect(x + 17, y + 19, 33, 33, accent ? "#f9e3e7" : "#edf3ee", "none", 9) +
+        icon(x + 21.5, y + 23.5, glyph, accent ? "#ae3d50" : "#456b5c") +
+        text(x + 63, y + 42, title, "node-title left") +
+        text(x + 21, y + 76, subtitle,
+          "node-subtitle left" + (subtitle.includes("/") || subtitle === "browse_url" ? " mono" : "")) + '</g>';
+    }
+    function check(x, y, allowed = true) {
+      const color = allowed ? palette.data.color : palette.internal.color;
+      return rect(x - 70, y - 18, 140, 36, allowed ? "#e8f3eb" : "#fff0f2",
+          allowed ? "#a8c7b2" : "#d9a6af", 9) +
+        '<path d="' + (allowed ? 'M ' + (x - 53) + ' ' + y + ' l 4 4 l 8 -9' :
+          'M ' + (x - 52) + ' ' + (y - 5) + ' l 10 10 m 0 -10 l -10 10') +
+        '" fill="none" stroke="' + color + '" stroke-width="2.2" stroke-linecap="round"/>' +
+        text(x + 9, y + 5, "URL Check", "gate-label", color);
+    }
+
+    // All system views share the same component positions.
+    function systemFrame() {
+      return zone(300, 30, 660, 770, "Private Network", "private") +
+        zone(1025, 30, 380, 770, "Public Web") +
+        rect(330, 95, 600, 485, "#fafcf9", "#7e9084", 15) +
+        text(354, 127, "AI Server", "group-label left", "#5a7160");
+    }
+    function systemComponents(scenario = "chain") {
+      const trusted = scenario === "trusted";
+      const blocked = scenario === "direct";
+      const inactive = markup => '<g class="inactive">' + markup + '</g>';
+      const active = card(32, 270, 200, 112, trusted ? "User" : "Attacker", "Browser", "person") +
+        card(365, 270, 220, 112, "AI Assistant", "Chat", "assistant") +
+        card(650, 150, 235, 92, "URL Check", "Trusted Origin", "shield");
+      const fetcher = card(650, 355, 235, 135, "URL Fetcher", "browse_url", "server");
+      const internal = card(650, 665, 235, 105, "Internal Service", "/admin/config", "database", true);
+      const help = card(1080, 175, 270, 112, "Help Center", trusted ? "Help Articles" : "Open Redirect", "globe");
+      const external = card(1080, 445, 270, 112, "External Site", "HTTP Redirect", "globe");
+      return active + (blocked ? inactive(fetcher) : fetcher) +
+        (trusted || blocked ? inactive(internal) : internal) +
+        (blocked ? inactive(help) : help) +
+        (trusted || blocked ? inactive(external) : external);
+    }
+
+    document.getElementById("system-trusted-diagram").insertAdjacentHTML("beforeend",
+      defs("system-trusted") + systemFrame() +
+      path("system-trusted", "M 232 300 H 365") +
+      path("system-trusted", "M 365 350 H 232", "data") +
+      path("system-trusted", "M 475 270 V 205 Q 475 191 489 191 H 650") +
+      path("system-trusted", "M 767 242 V 355") +
+      path("system-trusted", "M 650 450 H 489 Q 475 450 475 436 V 382", "data") +
+      path("system-trusted", "M 885 380 H 966 Q 980 380 980 366 V 149 Q 980 135 994 135 H 1201 Q 1215 135 1215 149 V 175") +
+      path("system-trusted", "M 1080 250 H 1024 Q 1010 250 1010 264 V 406 Q 1010 420 996 420 H 885", "data") +
+      systemComponents("trusted") +
+      label(299, 287, "Trusted URL") +
+      label(299, 337, "Help Article", "data") +
+      label(562, 178, "Help Center URL") +
+      label(562, 437, "Help Article", "data") +
+      label(1100, 122, "HTTP Request") +
+      label(947, 407, "Help Article", "data") +
+      '<circle cx="767" cy="296" r="14" fill="#e3efe7" stroke="#a8c7b2"/>' +
+      '<path d="M 761 296 l 4 4 l 8 -9" fill="none" stroke="#267361" stroke-width="2.2" stroke-linecap="round"/>'
+    );
+
+    document.getElementById("system-chain-diagram").insertAdjacentHTML("beforeend",
+      defs("system-chain") + systemFrame() +
+      path("system-chain", "M 232 300 H 365") +
+      path("system-chain", "M 365 350 H 232", "data") +
+      path("system-chain", "M 475 270 V 205 Q 475 191 489 191 H 650") +
+      path("system-chain", "M 767 242 V 355") +
+      path("system-chain", "M 650 450 H 489 Q 475 450 475 436 V 382", "data") +
+
+      path("system-chain", "M 885 380 H 966 Q 980 380 980 366 V 149 Q 980 135 994 135 H 1201 Q 1215 135 1215 149 V 175") +
+      path("system-chain", "M 1080 250 H 1024 Q 1010 250 1010 264 V 406 Q 1010 420 996 420 H 885", "redirect") +
+      path("system-chain", "M 885 460 H 1080") +
+      path("system-chain", "M 1080 515 H 1024 Q 1010 515 1010 529 V 536 Q 1010 550 996 550 H 854 Q 840 550 840 536 V 490", "redirect") +
+      path("system-chain", "M 720 490 V 665", "internal") +
+      path("system-chain", "M 815 665 V 490", "data") +
+      systemComponents() +
+
+      label(299, 287, "Chat") +
+      label(299, 337, "Sensitive Data", "data") +
+      label(562, 178, "Help Center URL") +
+      label(562, 437, "Sensitive Data", "data") +
+      label(1100, 122, "HTTP Request") +
+      label(947, 407, "HTTP 302", "redirect") +
+      label(982, 447, "HTTP Request") +
+      label(945, 537, "HTTP 302", "redirect") +
+      label(698, 625, "HTTP Request", "internal") +
+      label(838, 595, "Sensitive Data", "data") +
+      '<circle cx="767" cy="296" r="14" fill="#e3efe7" stroke="#a8c7b2"/>' +
+      '<path d="M 761 296 l 4 4 l 8 -9" fill="none" stroke="#267361" stroke-width="2.2" stroke-linecap="round"/>'
+    );
+
+    document.getElementById("system-direct-diagram").insertAdjacentHTML("beforeend",
+      defs("system-direct") + systemFrame() +
+      path("system-direct", "M 232 300 H 365", "internal") +
+      path("system-direct", "M 365 350 H 232", "internal") +
+      path("system-direct", "M 475 270 V 205 Q 475 191 489 191 H 650", "internal") +
+      path("system-direct", "M 650 222 H 609 Q 595 222 595 236 V 436 Q 595 450 581 450 H 489 Q 475 450 475 436 V 382", "internal") +
+      '<path d="M 767 242 V 355" fill="none" stroke="#7a8d80" stroke-width="2" stroke-dasharray="6 6"/>' +
+      systemComponents("direct") +
+      label(299, 287, "Internal URL", "internal") +
+      label(299, 337, "Tool Error", "internal") +
+      label(562, 178, "Internal URL", "internal") +
+      label(535, 437, "Tool Error", "internal") +
+      '<circle cx="767" cy="296" r="18" fill="#fff0f2" stroke="#d9a6af"/>' +
+      '<path d="M 760 289 l 14 14 m 0 -14 l -14 14" fill="none" stroke="#ae3d50" stroke-width="2.6" stroke-linecap="round"/>'
+    );
+
+    function sequenceNode(x, title, subtitle, glyph, internal = false) {
+      return '<path d="M ' + x + ' 211 V 784" stroke="#63766b" stroke-width="2" stroke-dasharray="6 6" vector-effect="non-scaling-stroke"/>' +
+        card(x - 118, 98, 236, 98, title, subtitle, glyph, internal);
+    }
+    function edge(prefix, from, to, y, value, kind = "request") {
+      return path(prefix, "M " + from + " " + y + " H " + to, kind) +
+        label((from + to) / 2, y - 13, value, kind);
+    }
+
+    document.getElementById("sequence-trusted-diagram").insertAdjacentHTML("beforeend",
+      defs("sequence-trusted") +
+      zone(1177, 30, 256, 770, "Private Network", "private") +
+      text(435, 62, "AI Server", "group-label", "#5a7160") +
+      sequenceNode(145, "User", "Chat", "person") +
+      sequenceNode(435, "AI Assistant", "URL Fetcher", "assistant") +
+      sequenceNode(725, "Help Center", "Help Articles", "globe") +
+      '<g class="inactive">' +
+      sequenceNode(1015, "External Site", "HTTP Redirect", "globe") +
+      sequenceNode(1305, "Internal Service", "/admin/config", "database", true) +
+      '</g>' +
+      edge("sequence-trusted", 145, 435, 265, "Trusted URL") +
+      check(435, 305) +
+      edge("sequence-trusted", 435, 725, 350, "HTTP Request") +
+      edge("sequence-trusted", 725, 435, 480, "Help Article", "data") +
+      edge("sequence-trusted", 435, 145, 610, "Help Article", "data") +
+      rect(647, 211, 156, 29, "#eaf1f8", "none", 8) +
+      text(725, 230, "Trusted Origin", "gate-label", "#2d6293")
+    );
+
+    document.getElementById("chain-diagram").insertAdjacentHTML("beforeend",
+      defs("chain") +
+      zone(1177, 30, 256, 770, "Private Network", "private") +
+      text(435, 62, "AI Server", "group-label", "#5a7160") +
+      sequenceNode(145, "Attacker", "Chat", "person") +
+      sequenceNode(435, "AI Assistant", "URL Fetcher", "assistant") +
+      sequenceNode(725, "Help Center", "Open Redirect", "globe") +
+      sequenceNode(1015, "External Site", "HTTP Redirect", "globe") +
+      sequenceNode(1305, "Internal Service", "/admin/config", "database", true) +
+      edge("chain", 145, 435, 265, "Help Center URL") +
+      check(435, 305) +
+      edge("chain", 435, 725, 350, "HTTP Request") +
+      edge("chain", 725, 435, 415, "HTTP 302", "redirect") +
+      edge("chain", 435, 1015, 480, "HTTP Request") +
+      edge("chain", 1015, 435, 545, "HTTP 302", "redirect") +
+      edge("chain", 435, 1305, 610, "HTTP Request", "internal") +
+      edge("chain", 1305, 435, 685, "Sensitive Data", "data") +
+      edge("chain", 435, 145, 760, "Sensitive Data", "data") +
+      rect(647, 211, 156, 29, "#eaf1f8", "none", 8) +
+      text(725, 230, "Trusted Origin", "gate-label", "#2d6293")
+    );
+
+    document.getElementById("direct-diagram").insertAdjacentHTML("beforeend",
+      defs("direct") +
+      zone(1132, 30, 256, 770, "Private Network", "private") +
+      text(720, 62, "AI Server", "group-label", "#5a7160") +
+      sequenceNode(180, "Attacker", "Chat", "person") +
+      sequenceNode(720, "AI Assistant", "URL Fetcher", "assistant") +
+      sequenceNode(1260, "Internal Service", "/admin/config", "database", true) +
+      edge("direct", 180, 720, 320, "Internal URL", "internal") +
+      check(720, 375, false) +
+      '<path d="M 720 460 H 1260" fill="none" stroke="#9aa9a0" stroke-width="1.5" stroke-dasharray="4 7"/>' +
+      rect(971, 439, 42, 42, "#fff0f2", "#d9a6af", 21) +
+      '<path d="M 985 453 l 14 14 m 0 -14 l -14 14" stroke="#ae3d50" stroke-width="2.4" stroke-linecap="round"/>' +
+      edge("direct", 720, 180, 605, "Tool Error", "internal")
+    );
+
+    document.querySelector(".legend").innerHTML = Object.values(palette).map(p =>
+      '<span class="legend-item"><svg viewBox="0 0 34 14" aria-hidden="true">' +
+      '<path d="M 1 7 H 29" stroke="' + p.color + '" stroke-width="2"' +
+      (p.dash ? ' stroke-dasharray="' + p.dash + '"' : "") + '/>' +
+      '<path d="M 27 3 L 33 7 L 27 11 Z" fill="' + p.color + '"/></svg>' + esc(p.name) + '</span>'
+    ).join("");
+
+    const viewTabs = [...document.querySelectorAll('[role="tab"]')];
+    const scenarioButtons = [...document.querySelectorAll(".scenario-switch button")];
+    const panels = [...document.querySelectorAll(".panel")];
+    let currentView = "system";
+    let currentScenario = "trusted";
+
+    function updateView() {
+      viewTabs.forEach(tab => {
+        const selected = tab.dataset.view === currentView;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      scenarioButtons.forEach(button => {
+        button.setAttribute("aria-pressed", String(button.dataset.scenario === currentScenario));
+      });
+      panels.forEach(panel => {
+        panel.hidden = panel.dataset.view !== currentView || panel.dataset.scenario !== currentScenario;
+      });
+    }
+    function bindNavigation(buttons, activate) {
+      buttons.forEach((button, index) => {
+        button.addEventListener("click", () => activate(button));
+        button.addEventListener("keydown", event => {
+          let target;
+          if (event.key === "ArrowLeft") target = buttons[(index - 1 + buttons.length) % buttons.length];
+          if (event.key === "ArrowRight") target = buttons[(index + 1) % buttons.length];
+          if (event.key === "Home") target = buttons[0];
+          if (event.key === "End") target = buttons[buttons.length - 1];
+          if (!target) return;
+          event.preventDefault();
+          activate(target);
+          target.focus();
+        });
+      });
+    }
+    bindNavigation(viewTabs, tab => { currentView = tab.dataset.view; updateView(); });
+    bindNavigation(scenarioButtons, button => { currentScenario = button.dataset.scenario; updateView(); });
+    updateView();
+  </script>
+</body>
+</html>
